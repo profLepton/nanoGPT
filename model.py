@@ -67,9 +67,12 @@ class CausalSelfAttention(nn.Module):
         # q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         # v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
-        query = self.queries(x[:, -1, :]).view(B, self.n_head, -1).transpose(0, 1)
+        query = self.queries(x[:, -1, :].unsqueeze(1)).view(B, 1, self.n_head, -1).transpose(1, 2)
+
         key = self.keys(x).view(B, T, self.n_head, -1).transpose(1, 2)
         value = self.values(x).view(B, T, self.n_head, -1).transpose(1, 2)
+
+   
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -78,14 +81,19 @@ class CausalSelfAttention(nn.Module):
         else:
             # manual implementation of attention
             att = (query @ key.transpose(-2, -1)) * (1.0 / math.sqrt(query.size(-1)))
+       
             # att = att.masked_fill(self.bias[:,:,:T-1,:T] == 0, float('-inf'))
             att = self.QuietSoftmax(att, dim=-1)
             att = self.attn_dropout(att)
             y = att @ value # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+          
+            y = torch.cat([x[:, :-1, :].view(B, T-1, self.n_head, -1).transpose(1, 2), y], dim=2)
+
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
-        # output projection
+        # TODO FIX THIS
         y = self.resid_dropout(self.c_proj(y))
+        
         return y
 
 class MLP(nn.Module):
@@ -197,8 +205,10 @@ class GPT(nn.Module):
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            logits = self.lm_head(x[:, -1, :])
+            targets = targets[:, -1] # crop to only the last token
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+            # loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
