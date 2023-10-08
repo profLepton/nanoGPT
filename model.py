@@ -86,9 +86,14 @@ class CausalSelfAttention(nn.Module):
             att = self.QuietSoftmax(att, dim=-1)
             att = self.attn_dropout(att)
             y = att @ value # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-          
-            y = torch.cat([x[:, :-1, :].view(B, T-1, self.n_head, -1).transpose(1, 2), y], dim=2)
+            
+            if T > 1:
+                untouched_words = x[:, :-1, :].view(B, T-1, self.n_head, C//self.n_head).transpose(1, 2)
+            else:
+                untouched_words = torch.empty(B, self.n_head, 0, self.n_embd // self.n_head, device=x.device)
 
+            y = torch.cat([untouched_words, y], dim=2)
+            
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
      
         # Apply final linear projection and residual dropout to last vection in dim 1 of y only
