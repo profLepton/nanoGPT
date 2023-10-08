@@ -90,9 +90,10 @@ class CausalSelfAttention(nn.Module):
             y = torch.cat([x[:, :-1, :].view(B, T-1, self.n_head, -1).transpose(1, 2), y], dim=2)
 
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
-
-        # TODO FIX THIS
-        y = self.resid_dropout(self.c_proj(y))
+     
+        # Apply final linear projection and residual dropout to last vection in dim 1 of y only
+      
+        y = torch.cat([x[:, :-1, :], self.resid_dropout(self.c_proj(y[:, -1, :])).unsqueeze(1)], dim=1)
         
         return y
 
